@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections.Generic;
+using UnityEditor.Rendering;
 
 public struct TriangleData {
     public int[] indices;
@@ -31,14 +32,31 @@ public struct TriangleData {
         td.z[1] = z1;
         td.z[2] = z2;
     }
+
+    public static Vector3 GetVector(TriangleData td, int i) {
+        return new Vector3(td.x[i], td.y[i], td.z[i]);
+    }
 }
 
 public enum UVMapFnID {
-    BOX = 0,
+    PROJECTION = 0,
     BARK = 1,
 }
 
-public enum AXIS { X = 0, Y = 1, Z = 2 }
+public enum AXIS {
+    X = 0, 
+    Y = 1, 
+    Z = 2,
+}
+
+public enum SIDE {
+    TOP = 0, 
+    BOTTOM = 1, 
+    RIGHT = 2,
+    LEFT = 3,
+    FRONT = 4,
+    BACK = 5,
+}
 
 public delegate void UVMapFn(MaterialData mat, TriangleData td, List<Vector2> uvs);
 
@@ -49,9 +67,10 @@ public class UVMapper : MonoBehaviour {
     // This is the same as if we were to compare the rotation of
     // the vector to some threshold.
     public const float adjacent = 0.70710678f;
+    public const float axisAlignThreshold = 2f; // 2 degrees
     public const float sideThreshold = 0.1f;
 
-    private readonly UVMapFn[] mapFunctions = { BoxMapping, BarkMapping };
+    private readonly UVMapFn[] mapFunctions = { ProjectionMapping, BarkMapping };
 
     public static UVMapFn GetMapFunction(UVMapper mapper, UVMapFnID id) {
         return mapper.mapFunctions[(int)id];
@@ -80,78 +99,193 @@ public class UVMapper : MonoBehaviour {
         mesh.SetUVs(0, uvs);
     }
 
-    // a, b and c are vertices of a triangle, passed in CW order
-    public static void BoxMapping(MaterialData mat, TriangleData triangle, List<Vector2> uvs) {
-        float ax = triangle.x[0];
-        float bx = triangle.x[1];
-        float cx = triangle.x[2];
-        float ay = triangle.y[0];
-        float by = triangle.y[1];
-        float cy = triangle.y[2];
-        float az = triangle.z[0];
-        float bz = triangle.z[1];
-        float cz = triangle.z[2];
-        Vector3 av = new Vector3(ax, ay, az);
-        Vector3 bv = new Vector3(bx, by, bz);
-        Vector3 cv = new Vector3(cx, cy, cz);
-        Vector3 normal = Vector3.Cross(av - bv, av - cv).normalized;
+    // Projects textures along the cardinal axis.
+    // The bark texture is applied to the sides, no
+    // matter how far into the mesh you slice.
+    public static void ProjectionMapping(MaterialData mat, TriangleData triangle, List<Vector2> uvs) {
+        Vector3 a = TriangleData.GetVector(triangle, 0);
+        Vector3 b = TriangleData.GetVector(triangle, 1);
+        Vector3 c = TriangleData.GetVector(triangle, 2);
+        Vector3 normal = Vector3.Cross(a - b, a - c).normalized;
         
-        Vector2 a2 = Vector2.zero;
-        Vector2 b2 = Vector2.zero;
-        Vector2 c2 = Vector2.zero;
+        Vector2 uva = Vector2.zero;
+        Vector2 uvb = Vector2.zero;
+        Vector2 uvc = Vector2.zero;
 
-        // Sides are 0, top/bottom is 1
+        // Sides are 0, top/bottom is 1.
+        // This info should be provided by the
+        // MaterialData object.
+        // MaterialIndex.GetTileIndex(mi, materialData, SIDE);
+        
+        // Tile 0 is the side with bark
         int tile = 0;
-        
-        // normal points to either side
-        if (WithinThreshold(normal, AXIS.Y, sideThreshold)) {
 
-            // points to right or left
-            // ignore x
-            if (normal.z < adjacent && normal.z >= -adjacent) {
-                // x > 0 ? right : left
-                // Y axis is flipped in UV coords
-                a2.x = (az + mat.halfSize.z) / mat.size.z;
-                a2.y = (ay + mat.halfSize.y) / mat.size.y;
-                b2.x = (bz + mat.halfSize.z) / mat.size.z;
-                b2.y = (by + mat.halfSize.y) / mat.size.y;
-                c2.x = (cz + mat.halfSize.z) / mat.size.z;
-                c2.y = (cy + mat.halfSize.y) / mat.size.y;
-            }
+        // Check if the normal is within a range of +/- 85 deg
+        // of the world Y axis.
+        if (IsAlignedY(normal, 85f)) {
+            uva = ProjectY(a, mat.halfSize, mat.size);
+            uvb = ProjectY(b, mat.halfSize, mat.size);
+            uvc = ProjectY(c, mat.halfSize, mat.size);
+            // Tile 3 is the edge without bark
+            tile = 3;
+        }
 
-            // points forward or backward
-            // ignore z
-            if (normal.x < adjacent && normal.x >= -adjacent) {
-                // z > 0 ? forward : backward
-                a2.x = (ax + mat.halfSize.x) / mat.size.x;
-                a2.y = (ay + mat.halfSize.y) / mat.size.y;
-                b2.x = (bx + mat.halfSize.x) / mat.size.x;
-                b2.y = (by + mat.halfSize.y) / mat.size.y;
-                c2.x = (cx + mat.halfSize.x) / mat.size.x;
-                c2.y = (cy + mat.halfSize.y) / mat.size.y;
-            }
+        // These checks fail when slicing at an angle outside
+        // axisAlignThreshold. Could improve the IsAligned functions
+        // to accept an axis to project along. That way I could
+        // project the texture along the normal of the triangle.
+        // how would that translate to UV coords?
+        if (IsAlignedX(normal, axisAlignThreshold)) {
+            uva = ProjectX(a, mat.halfSize, mat.size);
+            uvb = ProjectX(b, mat.halfSize, mat.size);
+            uvc = ProjectX(c, mat.halfSize, mat.size);
+        }
 
-        } else {
-
-            tile = 1;
-            
-            // normal points upwardish
-            // ignore y
-            a2.x = (ax + mat.halfSize.x) / mat.size.x;
-            a2.y = (az + mat.halfSize.z) / mat.size.z;
-            b2.x = (bx + mat.halfSize.x) / mat.size.x;
-            b2.y = (bz + mat.halfSize.z) / mat.size.z;
-            c2.x = (cx + mat.halfSize.x) / mat.size.x;
-            c2.y = (cz + mat.halfSize.z) / mat.size.z;
+        if (IsAlignedZ(normal, axisAlignThreshold)) {
+            uva = ProjectZ(a, mat.halfSize, mat.size);
+            uvb = ProjectZ(b, mat.halfSize, mat.size);
+            uvc = ProjectZ(c, mat.halfSize, mat.size);
         }
         
-        uvs[triangle.indices[0]] = RemapUVCoordToTile(mat, a2, tile);
-        uvs[triangle.indices[1]] = RemapUVCoordToTile(mat, b2, tile);
-        uvs[triangle.indices[2]] = RemapUVCoordToTile(mat, c2, tile);
+        uvs[triangle.indices[0]] = RemapUVCoordToTile(mat, uva, tile);
+        uvs[triangle.indices[1]] = RemapUVCoordToTile(mat, uvb, tile);
+        uvs[triangle.indices[2]] = RemapUVCoordToTile(mat, uvc, tile);
     }
 
     public static void BarkMapping(MaterialData mat, TriangleData triangle, List<Vector2> uvs) {
+        Vector3 a = TriangleData.GetVector(triangle, 0);
+        Vector3 b = TriangleData.GetVector(triangle, 1);
+        Vector3 c = TriangleData.GetVector(triangle, 2);
+        Vector3 normal = Vector3.Cross(a - b, a - c).normalized;
         
+        Vector2 uva = Vector2.zero;
+        Vector2 uvb = Vector2.zero;
+        Vector2 uvc = Vector2.zero;
+
+        // Sides are 0, top/bottom is 1. This info should be provided by the
+        // MaterialData object. Won't work for bark materials, will it?
+        // Don't implement this yet. I need to see how MaterialData matures.
+        // MaterialIndex.GetTileIndex(mi, materialData, SIDE);
+        int tile = 0;
+
+        if (IsAlignedX(normal, axisAlignThreshold)) {
+            uva = ProjectX(a, mat.halfSize, mat.size);
+            uvb = ProjectX(b, mat.halfSize, mat.size);
+            uvc = ProjectX(c, mat.halfSize, mat.size);
+            // Pick a vertex and see if it is a part of the bark
+            tile = (a.x < -(mat.halfSize.x - mat.barkThickness.x)) ||
+                   (a.x >   mat.halfSize.x - mat.barkThickness.x)
+                ? 0
+                : 1;
+        }
+
+        if (IsAlignedZ(normal, axisAlignThreshold)) {
+            uva = ProjectZ(a, mat.halfSize, mat.size);
+            uvb = ProjectZ(b, mat.halfSize, mat.size);
+            uvc = ProjectZ(c, mat.halfSize, mat.size);
+            tile = (a.z < -(mat.halfSize.z - mat.barkThickness.x)) ||
+                   (a.z >   mat.halfSize.z - mat.barkThickness.x)
+                ? 0
+                : 1;
+        }
+
+        if (IsAlignedY(normal, axisAlignThreshold)) {
+            uva = ProjectY(a, mat.halfSize, mat.size);
+            uvb = ProjectY(b, mat.halfSize, mat.size);
+            uvc = ProjectY(c, mat.halfSize, mat.size);
+            tile = (a.y < -(mat.halfSize.y - mat.barkThickness.y)) ||
+                   (a.y >   mat.halfSize.y - mat.barkThickness.y)
+                ? 2
+                : 3;
+        }
+        
+        uvs[triangle.indices[0]] = RemapUVCoordToTile(mat, uva, tile);
+        uvs[triangle.indices[1]] = RemapUVCoordToTile(mat, uvb, tile);
+        uvs[triangle.indices[2]] = RemapUVCoordToTile(mat, uvc, tile);
+    }
+
+    private static Vector2 ProjectX(Vector3 coord, Vector3 offset, Vector3 size) {
+        return new Vector2((coord.z + offset.z) / size.z,
+                           (coord.y + offset.y) / size.y);
+    }
+
+    private static Vector2 ProjectY(Vector3 coord, Vector3 offset, Vector3 size) {
+        return new Vector2((coord.x + offset.x) / size.x,
+                           (coord.z + offset.z) / size.z);
+    }
+
+    private static Vector2 ProjectZ(Vector3 coord, Vector3 offset, Vector3 size) {
+        return new Vector2((coord.x + offset.x) / size.x,
+                           (coord.y + offset.y) / size.y);
+    }
+    
+    // Why does this work again?
+//    private static SIDE GetSide(Vector3 vector, float threshold) {
+//        if (vector.z < threshold && vector.z >= -threshold) {
+//            return vector.x > 0 ? SIDE.RIGHT : SIDE.LEFT;
+//        }
+//        if (vector.x < threshold && vector.x >= -threshold) {
+//            return vector.z > 0 ? SIDE.FRONT : SIDE.BACK;
+//        }
+//        return vector.y > 0 ? SIDE.TOP : SIDE.BOTTOM;
+//    }
+
+//    private static SIDE GetSide(Vector3 vector, float threshold) {
+//        threshold *= Mathf.Deg2Rad;
+//        float rad = Mathf.Acos(Vector3.Dot(vector, Vector3.forward));
+//        
+//        if (rad > -threshold && rad < threshold) {
+//            return SIDE.FRONT;
+//        }
+//        if (rad > Mathf.PI - threshold) {
+//            return SIDE.BACK;
+//        }
+//        if (rad > Mathf.PI * 0.5f - threshold && 
+//            rad < Mathf.PI * 0.5f + threshold) {
+//            
+//            rad = Mathf.Acos(Vector3.Dot(vector, Vector3.right));
+//            
+//            if (rad > -threshold && rad < threshold) {
+//                return SIDE.RIGHT;
+//            }
+//            if (rad > Mathf.PI - threshold) {
+//                return SIDE.LEFT;
+//            }
+//
+//            if (rad > Mathf.PI * 0.5f - threshold &&
+//                rad < Mathf.PI * 0.5f + threshold) {
+//
+//                rad = Mathf.Acos(Vector3.Dot(vector, Vector3.up));
+//
+//                if (rad > -threshold && rad < threshold) {
+//                    return SIDE.TOP;
+//                }
+//                if (rad > Mathf.PI - threshold) {
+//                    return SIDE.BOTTOM;
+//                }
+//            }
+//        }
+//    }
+
+    // Threshold in degrees
+    public static bool IsAlignedX(Vector3 dir, float threshold) {
+        threshold *= Mathf.Deg2Rad;
+        float rad = Mathf.Acos(Vector3.Dot(dir, Vector3.right));
+        return (rad > -threshold && rad < threshold) || (rad > Mathf.PI - threshold);
+    }
+
+    // Threshold in degrees
+    public static bool IsAlignedY(Vector3 dir, float threshold) {
+        threshold *= Mathf.Deg2Rad;
+        float rad = Mathf.Acos(Vector3.Dot(dir, Vector3.up));
+        return (rad > -threshold && rad < threshold) || (rad > Mathf.PI - threshold);
+    }
+
+    // Threshold in degrees
+    public static bool IsAlignedZ(Vector3 dir, float threshold) {
+        threshold *= Mathf.Deg2Rad;
+        float rad = Mathf.Acos(Vector3.Dot(dir, Vector3.forward));
+        return (rad > -threshold && rad < threshold) || (rad > Mathf.PI - threshold);
     }
 
     private static Vector2 RemapUVCoordToTile(MaterialData mat, Vector2 uv, int tile) {

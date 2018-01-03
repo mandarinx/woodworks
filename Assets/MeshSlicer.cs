@@ -4,7 +4,7 @@ using MIConvexHull;
 
 public class MeshSlicer : MonoBehaviour {
 
-    public MeshFilter             mesh;
+    public Entity                 entity;
     public Transform              sliceplane;
     public MaterialIndex          matIndex;
     public UVMapper               uvMapper;
@@ -18,13 +18,14 @@ public class MeshSlicer : MonoBehaviour {
     private List<Vector3>         vertBufferFront = new List<Vector3>();
     private List<Vector3>         vertBufferBack = new List<Vector3>();
     private readonly Vector3[]    edges = new Vector3[3];
-    private List<Vector2>         uvBack = new List<Vector2>();
-    private List<Vector2>         uvFront = new List<Vector2>();
     
-    public void Slice() {
+    public void Slice(Entity entity) {
         bufferBack.Clear();
         bufferFront.Clear();
+
+        MeshFilter mesh = entity.GetComponent<MeshFilter>();
         
+        // Slice each triangle
         for (int i = 0; i < mesh.sharedMesh.triangles.Length; i += 3) {
             int t1 = mesh.sharedMesh.triangles[i];
             int t2 = mesh.sharedMesh.triangles[i + 1];
@@ -43,12 +44,12 @@ public class MeshSlicer : MonoBehaviour {
             UpdateBuffer(vertBufferFront, bufferFront);
         }
 
-        UpdateMesh(bufferBack, uvBack, mesh.sharedMesh, uvMapper);
+        UpdateMesh(bufferBack, mesh.sharedMesh, entity.materialID, uvMapper);
         mesh.GetComponent<MeshCollider>().enabled = false;
         mesh.GetComponent<MeshCollider>().enabled = true;
         
         Mesh frontMesh = new Mesh();
-        UpdateMesh(bufferFront, uvFront, frontMesh, uvMapper);
+        UpdateMesh(bufferFront, frontMesh, entity.materialID, uvMapper);
         
         GameObject front = new GameObject();
         front.transform.position = mesh.transform.position;
@@ -56,10 +57,13 @@ public class MeshSlicer : MonoBehaviour {
         front.AddComponent<MeshRenderer>().sharedMaterial = mesh.transform.GetComponent<MeshRenderer>().sharedMaterial;
         front.AddComponent<MeshCollider>().convex = true;
         Rigidbody rb = front.AddComponent<Rigidbody>();
-        rb.AddForceAtPosition(-sliceplane.forward * 200f, sliceplane.position + Vector3.Cross(sliceplane.right, -sliceplane.forward) * 2f);
+        rb.AddForceAtPosition(
+            -sliceplane.forward * 200f,
+            sliceplane.position - sliceplane.right * 0.5f
+            );
     }
 
-    private void UpdateMesh(List<Vector3> input, List<Vector2> uvs, Mesh mesh, UVMapper uvMapper) {
+    private void UpdateMesh(List<Vector3> input, Mesh mesh, MaterialID matid, UVMapper uvMapper) {
         Vertex3[] inputVtx3 = new Vertex3[input.Count];
         CastToVertex3(input, inputVtx3);
 
@@ -75,7 +79,7 @@ public class MeshSlicer : MonoBehaviour {
         
             // Sometime in the future, I'd like each side of the log
             // to share vertices, and only separate them along the 
-            // edges.
+            // cardinal edges.
             
             // This is how we do it when we want to separate each
             // triangle. We create a vertex for each point of each
@@ -102,8 +106,7 @@ public class MeshSlicer : MonoBehaviour {
         mesh.vertices = vertices;
         mesh.SetIndices(indices, MeshTopology.Triangles, 0);
 
-        // The MaterialID would normally come from the target object
-        MaterialData md = MaterialIndex.GetMaterialData(matIndex, MaterialID.WOOD_BARK);
+        MaterialData md = MaterialIndex.GetMaterialData(matIndex, matid);
         UVMapFn mapFn = UVMapper.GetMapFunction(uvMapper, md.mapFnID);
         UVMapper.SetUV(md, mesh, mapFn);
 

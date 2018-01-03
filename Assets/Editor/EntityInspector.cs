@@ -30,11 +30,11 @@ public class EntityInspector : Editor {
         MaterialData md = MaterialIndex.GetMaterialData(index, e.materialID);
         
         if (GUILayout.Button("Box Mapping")) {
-            UVMapper.SetUV(md, mesh, UVMapper.BoxMapping);
+            UVMapper.SetUV(md, mesh, UVMapper.GetMapFunction(uvm, UVMapFnID.PROJECTION));
         }
         
         if (GUILayout.Button("Bark Mapping")) {
-            UVMapper.SetUV(md, mesh, UVMapper.BarkMapping);
+            UVMapper.SetUV(md, mesh, UVMapper.GetMapFunction(uvm, UVMapFnID.BARK));
         }
     }
 }

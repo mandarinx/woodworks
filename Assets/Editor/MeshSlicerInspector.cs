@@ -8,7 +8,8 @@ public class MeshSlicerInspector : Editor {
         DrawDefaultInspector();
 
         if (GUILayout.Button("Slice")) {
-            (target as MeshSlicer).Slice();
+            MeshSlicer slicer = target as MeshSlicer;
+            slicer.Slice(slicer.entity);
         }
     }
 }
