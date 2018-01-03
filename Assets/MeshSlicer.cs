@@ -35,13 +35,14 @@ public class MeshSlicer : MonoBehaviour {
             edges[2] = mesh.sharedMesh.vertices[t3];
             vertBufferBack.Clear();
             vertBufferFront.Clear();
-            SutherlandHodgman(edges, 
-                              -sliceplane.forward, 
-                              sliceplane.position - mesh.transform.position, 
-                              ref vertBufferFront, 
-                              ref vertBufferBack);
-            UpdateBuffer(vertBufferBack, bufferBack);
-            UpdateBuffer(vertBufferFront, bufferFront);
+            Methods.SutherlandHodgman(
+                edges, 
+                -sliceplane.forward, 
+                sliceplane.position - mesh.transform.position, 
+                ref vertBufferFront, 
+                ref vertBufferBack);
+            Methods.CopyVertBuffer(vertBufferBack, bufferBack);
+            Methods.CopyVertBuffer(vertBufferFront, bufferFront);
         }
 
         UpdateMesh(bufferBack, mesh.sharedMesh, entity.materialID, uvMapper);
@@ -127,60 +128,6 @@ public class MeshSlicer : MonoBehaviour {
         }
     }
 
-    private void UpdateBuffer(List<Vector3> vertBuffer, List<Vector3> buffer) {
-        int vbc = vertBuffer.Count;
-        if (vbc == 4) {
-            buffer.Add(vertBuffer[0]);
-            buffer.Add(vertBuffer[1]);
-            buffer.Add(vertBuffer[2]);
-            buffer.Add(vertBuffer[0]);
-            buffer.Add(vertBuffer[2]);
-            buffer.Add(vertBuffer[3]);
-            return;
-        }
-        for (int j = 0; j < vbc; ++j) {
-            buffer.Add(vertBuffer[j]);
-        }
-    }
-
-    private void SutherlandHodgman(Vector3[] verts, Vector3 normal, Vector3 q, ref List<Vector3> front, ref List<Vector3> back) {
-        Vector3 a = verts[verts.Length - 1];
-        float adist = DistToPlane(a, q, normal);
-        
-        for (int i = 0; i < verts.Length; ++i) {
-            Vector3 b = verts[i];
-            float bdist = DistToPlane(b, q, normal);
-            
-            if (InFrontOfPlane(bdist)) {
-                if (AtBackOfPlane(adist)) {
-                    Vector3 vi = Vector3.Lerp(b, a, bdist / (bdist - adist));
-                    front.Add(vi);
-                    back.Add(vi);
-                }
-                front.Add(b);
-                
-            } else if (AtBackOfPlane(bdist)) {
-                if (InFrontOfPlane(adist)) {
-                    Vector3 vi = Vector3.Lerp(a, b, adist / (adist - bdist));
-                    front.Add(vi);
-                    back.Add(vi);
-                } else if (OnPlane(adist)) {
-                    back.Add(a);
-                }
-                back.Add(b);
-                
-            } else {
-                front.Add(b);
-                if (OnPlane(adist)) {
-                    back.Add(b);
-                }
-            }
-            
-            a = b;
-            adist = bdist;
-        }
-    }
-
     private void OnDrawGizmos() {
 //        Vector3 redOffset = Vector3.down;
 //        Gizmos.color = Color.red;
@@ -193,25 +140,5 @@ public class MeshSlicer : MonoBehaviour {
 //        for (int i = 0; i < bufferFront.Count; ++i) {
 //            Gizmos.DrawSphere(bufferFront[i] + blueOffset, 0.02f);
 //        }
-    }
-
-    // Get the distance from a point to a plane
-    // P is the point
-    // Q is a point on the plane
-    // N is the normal of the plane
-    public static float DistToPlane(Vector3 p, Vector3 q, Vector3 n) {
-        return Vector3.Dot(p - q, n) / n.magnitude;
-    }
-
-    public static bool InFrontOfPlane(float dist) {
-        return dist > float.Epsilon;
-    }
-
-    public static bool AtBackOfPlane(float dist) {
-        return dist < float.Epsilon;
-    }
-
-    public static bool OnPlane(float dist) {
-        return !InFrontOfPlane(dist) && !AtBackOfPlane(dist);
     }
 }

@@ -10,15 +10,13 @@ public class GenCube : MonoBehaviour {
     public float height = 0.5f;
     [Range(0.5f, 5f)]
     public float length = 0.5f;
-    
-    private MeshFilter mf;
-    
-    void Awake() {
-        mf = GetComponent<MeshFilter>();
-    }
 
-    void OnEnable() {
-        Mesh mesh = mf.sharedMesh;
+    public void Reset() {
+        OnEnable();
+    }
+    
+    private void OnEnable() {
+        Mesh mesh = new Mesh();
         mesh.vertices = new [] {
             // top
             new Vector3(width * -.5f, height *  .5f, length * -.5f), // left   top    back 
@@ -94,5 +92,6 @@ public class GenCube : MonoBehaviour {
             30, 31, 32,
             33, 34, 35,
         };
+        GetComponent<MeshFilter>().sharedMesh = mesh;
     }
 }
